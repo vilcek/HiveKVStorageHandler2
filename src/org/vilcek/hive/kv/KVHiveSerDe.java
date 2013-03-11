@@ -21,6 +21,7 @@ import java.util.*;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.SerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
+import org.apache.hadoop.hive.serde2.SerDeStats;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
@@ -93,8 +94,15 @@ public class KVHiveSerDe implements SerDe {
     }
 
     @Override
+    public SerDeStats getSerDeStats() {
+        //throw new UnsupportedOperationException("Not supported yet.");
+        return new SerDeStats();
+    }
+
+    @Override
     public Writable serialize(Object o, ObjectInspector oi) throws SerDeException {
-        throw new UnsupportedOperationException("Not supported yet.");
-    } 
+        //throw new UnsupportedOperationException("Not supported yet.");
+        return null;
+    }
     
 }

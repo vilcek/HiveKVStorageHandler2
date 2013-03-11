@@ -22,8 +22,11 @@ import java.util.Map;
 import java.util.Properties;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
+import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.ql.metadata.HiveStorageHandler;
 import org.apache.hadoop.hive.ql.plan.TableDesc;
+import org.apache.hadoop.hive.ql.security.authorization.DefaultHiveAuthorizationProvider;
+import org.apache.hadoop.hive.ql.security.authorization.HiveAuthorizationProvider;
 import org.apache.hadoop.hive.serde2.SerDe;
 
 /**
@@ -75,5 +78,33 @@ public class KVHiveStorageHandler implements HiveStorageHandler {
     @Override
     public Configuration getConf() {
         return conf;
+    }
+
+    @Override
+    public HiveAuthorizationProvider getAuthorizationProvider() throws HiveException {
+        //throw new UnsupportedOperationException("Not supported yet.");
+        return new DefaultHiveAuthorizationProvider();
+    }
+
+    @Override
+    public void configureInputJobProperties(TableDesc td, Map<String, String> map) {
+        Properties p = td.getProperties();
+        Enumeration<Object> keys = p.keys();
+        while (keys.hasMoreElements()) {
+            String key = (String) keys.nextElement();
+            String value = p.getProperty(key);
+            map.put(key, value);
+        }
+    }
+
+    @Override
+    public void configureOutputJobProperties(TableDesc td, Map<String, String> map) {
+        Properties p = td.getProperties();
+        Enumeration<Object> keys = p.keys();
+        while (keys.hasMoreElements()) {
+            String key = (String) keys.nextElement();
+            String value = p.getProperty(key);
+            map.put(key, value);
+        }
     }
 }

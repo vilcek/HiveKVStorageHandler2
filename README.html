@@ -121,6 +121,9 @@
 </tr>
 </table>
 
+<p><b>Note: Please consider setting hive execution mode to local when working with small datasets. This avoids the overhead of lauching MapReduce jobs and in some cases the query will execute much faster. The better way to do that is by letting hive decide when to run jobs locally or not:</b></p>
+<p><code>hive> set hive.exec.mode.local.auto=true</code></p>
+
 <p />
 <div><code>hive> SELECT lastname, firstname, collect_set(birthdate)[0], collect_set(phonenumber)[0], collect_set(userid)[0]</code></div>
 <div><code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; FROM nosqldbtest</code></div>

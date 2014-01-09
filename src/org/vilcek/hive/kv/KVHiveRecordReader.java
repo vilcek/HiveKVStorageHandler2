@@ -20,11 +20,19 @@ package org.vilcek.hive.kv;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+
 import oracle.kv.KVStore;
 import oracle.kv.KVStoreConfig;
 import oracle.kv.KVStoreFactory;
 import oracle.kv.KeyValueVersion;
+import oracle.kv.Value.Format;
+import oracle.kv.avro.AvroCatalog;
+import oracle.kv.avro.JsonAvroBinding;
+import oracle.kv.avro.JsonRecord;
 import oracle.kv.impl.api.KVStoreImpl;
+
+import org.apache.avro.Schema;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.MapWritable;
 import org.apache.hadoop.io.NullWritable;
@@ -32,13 +40,14 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
+import org.codehaus.jackson.JsonNode;
 
 /**
  *
  * @author Alexandre Vilcek (alexandre.vilcek@oracle.com)
  */
 public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritable> {
-    
+
     private KVStore kvstore;
     private Iterator<KeyValueVersion> iter;
     private KeyValueVersion current;
@@ -46,28 +55,35 @@ public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritabl
     private KVHiveInputSplit inputSplit;
     private String majorKeyLabels;
     private String[] majorKeyLabelsArray;
-    
+    private JsonAvroBinding binding;
+
     private static final String SERIALIZED_NULL = NullWritable.get().toString();
-    
+
     public KVHiveRecordReader(InputSplit split, JobConf conf) {
         inputSplit = (KVHiveInputSplit) split;
         majorKeyLabels = conf.get(ConfigProperties.KV_MAJOR_KEYS_MAPPING);
         majorKeyLabelsArray = majorKeyLabels.split(",");
         String kvStoreName = inputSplit.getKVStoreName();
         String[] kvHelperHosts = inputSplit.getKVHelperHosts();
-        kvstore = KVStoreFactory.getStore
-            (new KVStoreConfig(kvStoreName, kvHelperHosts));
+        kvstore = KVStoreFactory.getStore(new KVStoreConfig(kvStoreName, kvHelperHosts));
         KVStoreImpl kvstoreImpl = (KVStoreImpl) kvstore;
         int singlePartId = inputSplit.getKVPart();
         iter = kvstoreImpl.partitionIterator(inputSplit.getDirection(),
-                                             inputSplit.getBatchSize(),
-                                             singlePartId,
-                                             inputSplit.getParentKey(),
-                                             inputSplit.getSubRange(),
-                                             inputSplit.getDepth(),
-                                             inputSplit.getConsistency(),
-                                             inputSplit.getTimeout(),
-                                             inputSplit.getTimeoutUnit());
+            inputSplit.getBatchSize(),
+            singlePartId,
+            inputSplit.getParentKey(),
+            inputSplit.getSubRange(),
+            inputSplit.getDepth(),
+            inputSplit.getConsistency(),
+            inputSplit.getTimeout(),
+            inputSplit.getTimeoutUnit());
+        AvroCatalog avroCatalog = kvstoreImpl.getAvroCatalog();
+        if (avroCatalog != null) {
+            Map<String, Schema> currentSchemas = avroCatalog.getCurrentSchemas();
+            if (currentSchemas != null && !currentSchemas.isEmpty()) {
+                binding = avroCatalog.getJsonMultiBinding(currentSchemas);
+            }
+        }
     }
 
     @Override
@@ -76,10 +92,10 @@ public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritabl
         if (ret) {
             current = iter.next();
             k.set(cnt);
-            v.clear(); 
+            v.clear();
             List<String> majorKeysList = current.getKey().getMajorPath();
             List<String> minorKeysList = current.getKey().getMinorPath();
-            for (int i=0; i<majorKeyLabelsArray.length; i++) {
+            for (int i = 0; i < majorKeyLabelsArray.length; i++) {
                 try {
                     String key = majorKeyLabelsArray[i];
                     String value = majorKeysList.get(i);
@@ -91,10 +107,18 @@ public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritabl
             }
             byte[] value = current.getValue().getValue();
             if (!value.toString().equals(SERIALIZED_NULL)) {
+                if (Format.AVRO == current.getValue().getFormat() && binding != null) {
+                    try {
+                        JsonRecord object = binding.toObject(current.getValue());
+                        JsonNode jsonNode = object.getJsonNode();
+                        value = jsonNode.toString().getBytes("UTF8");
+                    } catch (Throwable ignored) {
+                    }
+                }
                 if (minorKeysList.isEmpty()) {
                     v.put(new Text("value"), new Text(value));
                 } else {
-                    for (int j=0; j<minorKeysList.size(); j++) {
+                    for (int j = 0; j < minorKeysList.size(); j++) {
                         String key = minorKeysList.get(j);
                         v.put(new Text(key), new Text(value));
                     }
@@ -104,7 +128,7 @@ public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritabl
             return ret;
         } else {
             return false;
-        }  
+        }
     }
 
     @Override
@@ -131,5 +155,5 @@ public class KVHiveRecordReader implements RecordReader<LongWritable, MapWritabl
     public float getProgress() throws IOException {
         return inputSplit.getLength() > 0 ? cnt / (float) inputSplit.getLength() : 1.0f;
     }
-    
+
 }

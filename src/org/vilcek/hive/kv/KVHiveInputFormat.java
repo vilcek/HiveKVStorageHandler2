@@ -22,20 +22,40 @@ import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
-import oracle.kv.*;
+
+import oracle.kv.Consistency;
+import oracle.kv.Depth;
+import oracle.kv.Direction;
+import oracle.kv.KVStoreException;
+import oracle.kv.Key;
+import oracle.kv.KeyRange;
 import oracle.kv.impl.rep.RepNodeStatus;
 import oracle.kv.impl.rep.admin.RepNodeAdminAPI;
-import oracle.kv.impl.topo.*;
+import oracle.kv.impl.topo.PartitionId;
+import oracle.kv.impl.topo.PartitionMap;
+import oracle.kv.impl.topo.RepGroup;
+import oracle.kv.impl.topo.RepGroupId;
+import oracle.kv.impl.topo.RepNode;
+import oracle.kv.impl.topo.StorageNode;
+import oracle.kv.impl.topo.StorageNodeId;
+import oracle.kv.impl.topo.Topology;
 import oracle.kv.impl.util.TopologyLocator;
 import oracle.kv.impl.util.registry.RegistryUtils;
+
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.io.HiveInputFormat;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.MapWritable;
-import org.apache.hadoop.mapred.*;
+import org.apache.hadoop.mapred.FileInputFormat;
+import org.apache.hadoop.mapred.InputSplit;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.RecordReader;
+import org.apache.hadoop.mapred.Reporter;
 
 /**
  * 
@@ -46,9 +66,6 @@ public class KVHiveInputFormat extends HiveInputFormat<LongWritable, MapWritable
     private static String kvStoreName;
     private static String[] kvHelperHosts;
     private static Direction direction = Direction.FORWARD;
-    private static int batchSize = 0;
-    // private static Key parentKey = null;
-    // private static KeyRange subRange = null;
     private static Depth depth = Depth.PARENT_AND_DESCENDANTS;
     private static Consistency consistency = null;
     private static long timeout = 0;
@@ -77,6 +94,9 @@ public class KVHiveInputFormat extends HiveInputFormat<LongWritable, MapWritable
         PartitionMap partitionMap = topology.getPartitionMap();
         int nParts = partitionMap.getNPartitions();
         List<InputSplit> ret = new ArrayList<InputSplit>(nParts);
+
+        Map<Object, RepNodeStatus> statuses = new HashMap<Object, RepNodeStatus>();
+        Path[] tablePaths = FileInputFormat.getInputPaths(conf);
         for (int i = 1; i <= nParts; i++) {
             PartitionId partId = new PartitionId(i);
             RepGroupId repGroupId = topology.getRepGroupId(partId);
@@ -87,11 +107,17 @@ public class KVHiveInputFormat extends HiveInputFormat<LongWritable, MapWritable
             for (RepNode rn : repNodes) {
                 RepNodeStatus rnStatus = null;
                 try {
-                    RepNodeAdminAPI rna = regUtils.getRepNodeAdmin(rn.getResourceId());
-                    rnStatus = rna.ping();
+                    if (statuses.containsKey(rn.getResourceId())) {
+                        rnStatus = statuses.get(rn.getResourceId());
+                    } else {
+                        RepNodeAdminAPI rna = regUtils.getRepNodeAdmin(rn.getResourceId());
+                        rnStatus = rna.ping();
+                        statuses.put(rn.getResourceId(), rnStatus);
+                    }
                 } catch (RemoteException re) {
                     System.err.println("Ping failed for " + rn.getResourceId() + ": " + re.getMessage());
                     re.printStackTrace();
+                    statuses.put(rn.getResourceId(), null);
                 } catch (NotBoundException e) {
                     System.err.println("No RMI service for RN: " + rn.getResourceId() + " message: " + e.getMessage());
                 }
@@ -111,7 +137,6 @@ public class KVHiveInputFormat extends HiveInputFormat<LongWritable, MapWritable
                 repNodeNames.add(sn.getHostname());
                 repNodeNamesAndPorts.add(sn.getHostname() + ":" + sn.getRegistryPort());
             }
-            Path[] tablePaths = FileInputFormat.getInputPaths(conf);
 
             Key parentKey = null;
             String parentKeyValue = conf.get("oracle.kv.parentKey");
@@ -123,6 +148,8 @@ public class KVHiveInputFormat extends HiveInputFormat<LongWritable, MapWritable
             if (subRangeValue != null && subRangeValue.length() > 0) {
                 subRange = KeyRange.fromString(subRangeValue);
             }
+
+            int batchSize = conf.getInt("oracle.kv.batchSize", 0);
 
             ret.add(new KVHiveInputSplit(tablePaths[0]).setKVHelperHosts(repNodeNamesAndPorts.toArray(new String[0]))
                 .setKVStoreName(kvStoreName)
